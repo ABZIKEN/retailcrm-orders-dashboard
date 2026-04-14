@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orders Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: #121923;
+      --muted: #8fa3b8;
+      --text: #e9f0f7;
+      --border: #223041;
+      --accent: #5bb5ff;
+      --good: #33c27f;
+      --warn: #ffb84d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    p.sub {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+    .config {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .config textarea, .config input {
+      width: 100%;
+      padding: 12px;
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .config .full {
+      grid-column: 1 / -1;
+    }
+    .btns {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .primary { background: var(--accent); color: #08111a; }
+    .secondary { background: #1d2936; color: var(--text); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .value {
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 14px;
+    }
+    th { color: var(--muted); font-weight: 700; }
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #1e2c3b;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .ok { color: var(--good); }
+    .warn { color: var(--warn); }
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    @media (max-width: 900px) {
+      .grid, .config { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Orders Dashboard</h1>
+    <p class="sub">Вставь Supabase Project URL и anon key. Потом нажми Load dashboard.</p>
+
+    <div class="config">
+      <input id="supabaseUrl" placeholder="https://YOUR_PROJECT.supabase.co" />
+      <input id="anonKey" placeholder="YOUR_ANON_KEY" />
+      <div class="full">
+        <input id="tableName" value="orders" placeholder="orders" />
+      </div>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="loadBtn">Load dashboard</button>
+      <button class="secondary" id="saveBtn">Save config in browser</button>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">Total orders</div>
+        <div class="value" id="totalOrders">0</div>
+      </div>
+      <div class="card">
+        <div class="label">Total revenue</div>
+        <div class="value" id="totalRevenue">0 ₸</div>
+      </div>
+      <div class="card">
+        <div class="label">High value orders</div>
+        <div class="value" id="highValueOrders">0</div>
+      </div>
+      <div class="card">
+        <div class="label">Last sync</div>
+        <div class="value" id="lastSync">—</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <canvas id="ordersChart" height="100"></canvas>
+      <div class="small">График строится по created_at.</div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Number</th>
+            <th>Client</th>
+            <th>City</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+
+    <p class="small" id="debug"></p>
+  </div>
+
+  <script>
+    let chart;
+
+    function money(value) {
+      return new Intl.NumberFormat('ru-RU').format(Number(value || 0)) + ' ₸';
+    }
+
+    function dateKey(iso) {
+      const d = new Date(iso);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function displayDate(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleString('ru-RU');
+    }
+
+    function getConfig() {
+      return {
+        supabaseUrl: document.getElementById('supabaseUrl').value.trim().replace(/\/$/, ''),
+        anonKey: document.getElementById('anonKey').value.trim(),
+        tableName: document.getElementById('tableName').value.trim() || 'orders',
+      };
+    }
+
+    function saveConfig() {
+      const cfg = getConfig();
+      localStorage.setItem('ordersDashboardConfig', JSON.stringify(cfg));
+      alert('Config saved');
+    }
+
+    function loadSavedConfig() {
+      const raw = localStorage.getItem('ordersDashboardConfig');
+      if (!raw) return;
+      try {
+        const cfg = JSON.parse(raw);
+        document.getElementById('supabaseUrl').value = cfg.supabaseUrl || '';
+        document.getElementById('anonKey').value = cfg.anonKey || '';
+        document.getElementById('tableName').value = cfg.tableName || 'orders';
+      } catch {}
+    }
+
+    async function fetchOrders() {
+      const { supabaseUrl, anonKey, tableName } = getConfig();
+
+      if (!supabaseUrl || !anonKey) {
+        throw new Error('Fill Supabase URL and anon key');
+      }
+
+      const url = `${supabaseUrl}/rest/v1/${tableName}?select=external_id,number,first_name,last_name,city,total_amount,status,created_at,synced_at,notification_sent&order=created_at.desc`;
+
+      const res = await fetch(url, {
+        headers: {
+          'apikey': anonKey,
+          'Authorization': `Bearer ${anonKey}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+
+      return JSON.parse(text);
+    }
+
+    function renderStats(rows) {
+      const totalOrders = rows.length;
+      const totalRevenue = rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+      const highValueOrders = rows.filter(row => Number(row.total_amount || 0) > 50000).length;
+      const lastSyncRow = rows
+        .filter(row => row.synced_at)
+        .sort((a, b) => new Date(b.synced_at) - new Date(a.synced_at))[0];
+
+      document.getElementById('totalOrders').textContent = totalOrders;
+      document.getElementById('totalRevenue').textContent = money(totalRevenue);
+      document.getElementById('highValueOrders').textContent = highValueOrders;
+      document.getElementById('lastSync').textContent = lastSyncRow ? displayDate(lastSyncRow.synced_at) : '—';
+    }
+
+    function renderTable(rows) {
+      const body = document.getElementById('ordersBody');
+      body.innerHTML = '';
+
+      rows.slice(0, 10).forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.number || '—'}</td>
+          <td>${[row.first_name, row.last_name].filter(Boolean).join(' ') || '—'}</td>
+          <td>${row.city || '—'}</td>
+          <td>${money(row.total_amount)}</td>
+          <td><span class="status">${row.status || '—'}</span></td>
+          <td>${displayDate(row.created_at)}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    function renderChart(rows) {
+      const grouped = rows.reduce((acc, row) => {
+        const key = dateKey(row.created_at || new Date().toISOString());
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+
+      const labels = Object.keys(grouped).sort();
+      const data = labels.map(label => grouped[label]);
+
+      const ctx = document.getElementById('ordersChart');
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Orders per day',
+            data,
+            borderWidth: 2,
+            tension: 0.25
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              labels: { color: '#e9f0f7' }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#8fa3b8' },
+              grid: { color: '#223041' }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#8fa3b8' },
+              grid: { color: '#223041' }
+            }
+          }
+        }
+      });
+    }
+
+    async function loadDashboard() {
+      const debug = document.getElementById('debug');
+      debug.textContent = 'Loading...';
+      try {
+        const rows = await fetchOrders();
+        renderStats(rows);
+        renderTable(rows);
+        renderChart(rows);
+        debug.innerHTML = `<span class="ok">Dashboard loaded</span>. Rows: ${rows.length}`;
+      } catch (error) {
+        debug.innerHTML = `<span class="warn">${error.message}</span>`;
+      }
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', saveConfig);
+    document.getElementById('loadBtn').addEventListener('click', loadDashboard);
+
+    loadSavedConfig();
+  </script>
+</body>
+</html>
